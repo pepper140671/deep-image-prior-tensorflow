@@ -1,14 +1,33 @@
 import tensorflow as tf
 import numpy as np
 import scipy.stats as st
+import datetime as dt
 
 # Name of image to upscale. Must be a 256x256 PNG.
-image_name = "pupper.png"
+input_folder = "Input/"
+output_folder = "output/"
+image_name = "M84_Lx52_ABE1_NL"
+image_type = ".bmp"
+
+log = True # to log in text file all information
+log_file = image_name + "_log.txt"
 dim = 256
 
+blur = False # valeur initiale True
+
+# The number of down sampling and up sampling layers.
+# These should be equal if the ouput and input images
+# are to be equal.
+down_layer_count = 5
+up_layer_count = 5
+
+nbre_iterations = 5001 # valeur initiale 5001
+
+
 def load_image(filename, dim):
-    with open(image_name, 'rb') as f:
-        raw_image = tf.image.decode_png(f.read())
+    with open(input_folder + image_name + image_type, 'rb') as f:
+        # https://www.tensorflow.org/api_docs/python/tf/io/decode_image
+        raw_image = tf.image.decode_bmp(f.read())
 
     converted = tf.image.convert_image_dtype(
         raw_image,
@@ -127,13 +146,11 @@ def gkern(kernlen=5, nsig=3):
 # gaussian blur.
 def gblur(layer):
     gaus_filter = tf.expand_dims(tf.stack([gkern(),gkern(),gkern()], axis=2), axis=3)
-    return tf.nn.depthwise_conv2d(layer, gaus_filter, strides=[1,1,1,1], padding='SAME')
+    if blur:
+        return tf.nn.depthwise_conv2d(layer, gaus_filter, strides=[1,1,1,1], padding='SAME')
+    else:
+        return layer
 
-# The number of down sampling and up sampling layers.
-# These should be equal if the ouput and input images
-# are to be equal.
-down_layer_count = 5
-up_layer_count = 5
 
 image = load_image(image_name, dim)
 
@@ -151,6 +168,9 @@ for i in range(down_layer_count):
     skips.append(skip(out))
 
 print("Shape after downsample: " + str(out.get_shape()))
+if log:
+    f = open(output_folder + log_file,'w+')
+    f.write("Shape after downsample: " + str(out.get_shape()) + "\n")
 
 # Connect up the upsampling layers, from smallest to largest.
 skips.reverse()
@@ -167,6 +187,8 @@ for i in range(up_layer_count):
         out = up_layer(tf.concat([out, skips[i]], axis=3))
         
 print("Shape after upsample: " + str(out.get_shape()))
+if log:
+    f.write("Shape after upsample: " + str(out.get_shape()) + "\n")
 
 # Restore original image dimensions and channels
 out = tf.contrib.layers.conv2d(
@@ -177,6 +199,8 @@ out = tf.contrib.layers.conv2d(
     padding='SAME',
     activation_fn=tf.nn.sigmoid)
 print("Output shape: " + str(out.get_shape()))
+if log:
+    f.write("Output shape: " + str(out.get_shape()) + "\n")
 
 E = tf.losses.mean_squared_error(image, gblur(out))
 
@@ -188,9 +212,14 @@ with tf.control_dependencies(update_ops):
 sess = tf.InteractiveSession()
 sess.run(tf.global_variables_initializer())
 
-save_image("output/corrupt.png", tf.reshape(image, (dim,dim,3)))
+save_image(output_folder + "corrupt.png", tf.reshape(image, (dim,dim,3)))
 
-for i in range(5001):
+t_initial = dt.datetime.now()
+print("Démarrage calcul: ",t_initial)
+if log:
+    f.write("Démarrage calcul: " + str(t_initial) + "\n")
+
+for i in range(nbre_iterations):
     new_rand = np.random.uniform(0, 1.0/30.0, size=(1,dim,dim,32))
     _, lossval = sess.run(
         [train_op, E],
@@ -198,5 +227,13 @@ for i in range(5001):
     )
     if i % 100 == 0:
         image_out = sess.run(out, feed_dict={rand: new_rand}).reshape(dim,dim,3)
-        save_image("output/%d_%s" % (i, image_name), image_out)
-    print(i, lossval)
+        save_image(output_folder + "%d_%s" % (i, image_name) + ".png", image_out)
+    
+    t_new = dt.datetime.now()
+    t_interval = t_new - t_initial
+    t_initial = t_new
+    print(i, lossval, t_interval)
+    if log:
+        f.write("itération lossval temps: " + str(i) + "\t" + str(lossval) + "\t" + str(t_interval) + "\t" + "\n")
+
+f.close()
