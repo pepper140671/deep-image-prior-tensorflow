@@ -3,23 +3,26 @@ import numpy as np
 import scipy.stats as st
 import datetime as dt
 
-# Name of image to upscale. Must be a 256x256 PNG.
+# Name of image to upscale. Must be a dim x dim BMP.
 input_folder = "Input/"
 output_folder = "output/"
 image_name = "M84_Lx52_ABE1_NL"
 image_type = ".bmp"
+dim = 256
 
 log = True # to log in text file all information
 log_file = image_name + "_log.txt"
-dim = 256
 
-blur = False # valeur initiale True
+blur = False # valeur initiale True / to be reviewed if not used
 
 # The number of down sampling and up sampling layers.
 # These should be equal if the ouput and input images
 # are to be equal.
 down_layer_count = 5
+channels_per_layer = [8, 16, 32, 64, 128] # size similar to layer_count 
 up_layer_count = 5
+
+channels_per_skip_layer = [0, 0, 0, 4, 4] # size similar to layer_count
 
 nbre_iterations = 5001 # valeur initiale 5001
 
@@ -57,31 +60,31 @@ def save_image(filename, image):
     with open(filename, 'wb') as f:
         f.write(encoded_img.eval())
 
-def down_layer(layer):
+def down_layer(layer, channel):
     # https://stackoverflow.com/questions/50308951/understanding-input-output-tensors-from-tf-layers-conv2d
     layer = tf.contrib.layers.conv2d(
         inputs=layer,
-        num_outputs=128,
+        num_outputs=channel,
         kernel_size=3,
         stride=2,
         padding='SAME',
-        activation_fn=None)
+        activation_fn=tf.nn.leaky_relu) # remplacé None
     
-    layer = tf.contrib.layers.batch_norm(
-        inputs=layer,
-        activation_fn=tf.nn.leaky_relu)
+#    layer = tf.contrib.layers.batch_norm(
+#        inputs=layer,
+#        activation_fn=tf.nn.leaky_relu)
 
     layer = tf.contrib.layers.conv2d(
         inputs=layer,
-        num_outputs=128,
+        num_outputs=channel,
         kernel_size=3,
         stride=1,
         padding='SAME',
-        activation_fn=None)
+        activation_fn=tf.nn.leaky_relu) # remplacé None
     
-    layer = tf.contrib.layers.batch_norm(
-        inputs=layer,
-        activation_fn=tf.nn.leaky_relu)
+#    layer = tf.contrib.layers.batch_norm(
+#        inputs=layer,
+#        activation_fn=tf.nn.leaky_relu)
     
     return layer
 
@@ -94,23 +97,23 @@ def up_layer(layer):
         num_outputs=128,
         kernel_size=3,
         padding='SAME',
-        activation_fn=None)
+        activation_fn=tf.nn.leaky_relu) # remplacé None
     
-    layer = tf.contrib.layers.batch_norm(
-        inputs=layer,
-        activation_fn=tf.nn.leaky_relu
+#    layer = tf.contrib.layers.batch_norm(
+#        inputs=layer,
+#        activation_fn=tf.nn.leaky_relu
     )
     
     layer = tf.contrib.layers.conv2d(
         inputs=layer,
         num_outputs=3,
-        kernel_size=1,
+        kernel_size=1, # à quoi ça sert
         padding='SAME',
-        activation_fn=None)
+        activation_fn=tf.nn.leaky_relu) # remplacé None
     
-    layer = tf.contrib.layers.batch_norm(
-        inputs=layer,
-        activation_fn=tf.nn.leaky_relu)
+#    layer = tf.contrib.layers.batch_norm(
+#        inputs=layer,
+#        activation_fn=tf.nn.leaky_relu)
     
     height, width = layer.get_shape()[1:3]
     layer = tf.image.resize_images(
@@ -162,16 +165,17 @@ out = tf.constant(np.random.uniform(0, 0.1, size=(1,dim,dim,32)), dtype=tf.float
 
 # Connect up all the downsampling layers.
 skips = []
+# with tf.device('/GPU:0:'): # check name of GPU and indent the following lines.
 for i in range(down_layer_count):
-    out = down_layer(out)
+    out = down_layer(out,channels_per_layer[i])
     # Keep a list of the skip layers, so they can be connected
     # to the upsampling layers.
     skips.append(skip(out))
 
-print("Shape after downsample: " + str(out.get_shape()))
-if log:
-    f = open(output_folder + log_file,'w+')
-    f.write("Shape after downsample: " + str(out.get_shape()) + "\n")
+    print("Shape after downsample layer " + str(i) + ":" + str(out.get_shape()))
+    if log:
+        f = open(output_folder + log_file,'w+') ##### déplacer ####
+        f.write("Shape after downsample layer " + str(i) + ":" + str(out.get_shape()) + "\n")
 
 # Connect up the upsampling layers, from smallest to largest.
 skips.reverse()
@@ -185,11 +189,11 @@ for i in range(up_layer_count):
         # the input of each upsampling layer.
         # Note: It's not clear from the paper if concat is the right operator
         # but nothing else makes sense for the shape of the tensors.
-        out = up_layer(tf.concat([out, skips[i]], axis=3))
+    out = up_layer(tf.concat([out, skips[i]], axis=3),,channels_per_layer[-i-1])
         
-print("Shape after upsample: " + str(out.get_shape()))
-if log:
-    f.write("Shape after upsample: " + str(out.get_shape()) + "\n")
+    print("Shape after upsample " + str(i) + ":" + + str(out.get_shape()))
+    if log:
+        f.write("Shape after upsample " + str(i) + ":" + + str(out.get_shape()) + "\n")
 
 # Restore original image dimensions and channels
 out = tf.contrib.layers.conv2d(
@@ -210,7 +214,9 @@ update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
 with tf.control_dependencies(update_ops):
     train_op = optimizer.minimize(E)
 
-sess = tf.InteractiveSession()
+# sess = tf.InteractiveSession()
+# https://www.tensorflow.org/guide/using_gpu
+sess = tf.Session(config=tf.ConfigProto(log_device_placement=True))
 sess.run(tf.global_variables_initializer())
 
 save_image(output_folder + "corrupt.png", tf.reshape(image, (dim,dim,3)))
