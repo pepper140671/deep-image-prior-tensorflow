@@ -58,6 +58,7 @@ def save_image(filename, image):
         f.write(encoded_img.eval())
 
 def down_layer(layer):
+    # https://stackoverflow.com/questions/50308951/understanding-input-output-tensors-from-tf-layers-conv2d
     layer = tf.contrib.layers.conv2d(
         inputs=layer,
         num_outputs=128,
@@ -120,7 +121,7 @@ def up_layer(layer):
     return layer
 
 def skip(layer):
-    conv_out = tf.contrib.layers.conv2d(
+    conv_out = tf.contrib.layers.conv2d(7689
         inputs=layer,
         num_outputs=4,
         kernel_size=1,
