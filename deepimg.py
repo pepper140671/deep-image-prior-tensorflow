@@ -102,8 +102,7 @@ def up_layer(layer):
 #    layer = tf.contrib.layers.batch_norm(
 #        inputs=layer,
 #        activation_fn=tf.nn.leaky_relu
-    )
-    
+   
     layer = tf.contrib.layers.conv2d(
         inputs=layer,
         num_outputs=3,
