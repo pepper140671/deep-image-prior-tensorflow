@@ -3,12 +3,12 @@ import numpy as np
 import scipy.stats as st
 import datetime as dt
 
-# Name of image to upscale. Must be a dim x dim BMP.
+# Name of image to upscale. Must be a dim_h x dim_v BMP.
 input_folder = "Input/"
 output_folder = "output/"
 image_name = "M84_Lx52_ABE1_NL"
 image_type = ".bmp"
-dim = 256
+dim_h = dim_w = 256
 
 log = True # to log in text file all information
 log_file = image_name + "_log.txt"
@@ -24,10 +24,10 @@ up_layer_count = 5
 
 channels_per_skip_layer = [0, 0, 0, 4, 4] # size similar to layer_count
 
-nbre_iterations = 5001 # valeur initiale 5001
+nbre_iterations = 201 # valeur initiale 5001
 
 
-def load_image(filename, dim):
+def load_image(filename, dim_h,dim_w):
     with open(input_folder + image_name + image_type, 'rb') as f:
         # https://www.tensorflow.org/api_docs/python/tf/io/decode_image
         raw_image = tf.image.decode_bmp(f.read())
@@ -40,7 +40,7 @@ def load_image(filename, dim):
     
     resized = tf.image.resize_images(
         images = converted,
-        size = [dim, dim]
+        size = [dim_h, dim_w]
     )
 
     resized.set_shape((dim,dim,3))
@@ -88,13 +88,13 @@ def down_layer(layer, channel):
     
     return layer
 
-def up_layer(layer):
+def up_layer(layer, channel):
     layer = tf.contrib.layers.batch_norm(
         inputs=layer)
     
     layer = tf.contrib.layers.conv2d(
         inputs=layer,
-        num_outputs=128,
+        num_outputs=channel,
         kernel_size=3,
         padding='SAME',
         activation_fn=tf.nn.leaky_relu) # remplacé None
@@ -105,7 +105,7 @@ def up_layer(layer):
    
     layer = tf.contrib.layers.conv2d(
         inputs=layer,
-        num_outputs=3,
+        num_outputs=channel,
         kernel_size=1, # à quoi ça sert
         padding='SAME',
         activation_fn=tf.nn.leaky_relu) # remplacé None
@@ -123,7 +123,7 @@ def up_layer(layer):
     return layer
 
 def skip(layer):
-    conv_out = tf.contrib.layers.conv2d(7689
+    conv_out = tf.contrib.layers.conv2d(
         inputs=layer,
         num_outputs=4,
         kernel_size=1,
@@ -182,17 +182,22 @@ for i in range(up_layer_count):
     if i == 0:
         # As specified in the paper, the first upsampling layers is connected to
         # the last downsampling layer through a skip layer.
-        out = up_layer(skip(out))
+        out = up_layer(skip(out),channels_per_layer[-1])
+
+        print("Shape after upsample " + str(i) + ":" + str(out.get_shape()))
+        if log:
+            f.write("Shape after upsample " + str(i) + ":" + str(out.get_shape()) + "\n")
+
     else:
         # The output of the rest of the skip layers is concatenated onto
         # the input of each upsampling layer.
         # Note: It's not clear from the paper if concat is the right operator
         # but nothing else makes sense for the shape of the tensors.
-    out = up_layer(tf.concat([out, skips[i]], axis=3),,channels_per_layer[-i-1])
+        out = up_layer(tf.concat([out, skips[i]], axis=3),channels_per_layer[-i-1])
         
-    print("Shape after upsample " + str(i) + ":" + + str(out.get_shape()))
-    if log:
-        f.write("Shape after upsample " + str(i) + ":" + + str(out.get_shape()) + "\n")
+        print("Shape after upsample " + str(i) + ":" + str(out.get_shape()))
+        if log:
+            f.write("Shape after upsample " + str(i) + ":" + str(out.get_shape()) + "\n")
 
 # Restore original image dimensions and channels
 out = tf.contrib.layers.conv2d(
@@ -215,7 +220,7 @@ with tf.control_dependencies(update_ops):
 
 # sess = tf.InteractiveSession()
 # https://www.tensorflow.org/guide/using_gpu
-sess = tf.Session(config=tf.ConfigProto(log_device_placement=True))
+sess = tf.Session() # config=tf.ConfigProto(log_device_placement=True
 sess.run(tf.global_variables_initializer())
 
 save_image(output_folder + "corrupt.png", tf.reshape(image, (dim,dim,3)))
@@ -226,11 +231,13 @@ if log:
     f.write("Démarrage calcul: " + str(t_initial) + "\n")
 
 for i in range(nbre_iterations):
+    print("STEP 1")
     new_rand = np.random.uniform(0, 1.0/30.0, size=(1,dim,dim,32))
     _, lossval = sess.run(
         [train_op, E],
         feed_dict = {rand: new_rand}
     )
+    print("STEP 2")
     if i % 100 == 0:
         image_out = sess.run(out, feed_dict={rand: new_rand}).reshape(dim,dim,3)
         save_image(output_folder + "%d_%s" % (i, image_name) + ".png", image_out)
