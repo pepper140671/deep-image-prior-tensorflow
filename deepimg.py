@@ -6,8 +6,8 @@ import datetime as dt
 # Name of image to upscale. Must be a dim_h x dim_w BMP.
 input_folder = "Input/"
 output_folder = "output/"
-image_name = "M84_Lx52_ABE1_NL"
-image_type = ".bmp"
+image_name = "M84_Lx52_ABE1_NL-prestack"
+image_type = ".png"
 dim_h = dim_w = 256
 
 log = True # to log in text file all information
@@ -24,13 +24,13 @@ up_layer_count = 5
 
 channels_per_skip_layer = [0, 0, 0, 4, 4] # size similar to layer_count
 
-nbre_iterations = 5001 # valeur initiale 5001
+nbre_iterations = 201 # valeur initiale 5001
 
 
 def load_image(filename, dim_h,dim_w):
     with open(input_folder + image_name + image_type, 'rb') as f:
         # https://www.tensorflow.org/api_docs/python/tf/io/decode_image
-        raw_image = tf.image.decode_bmp(f.read())
+        raw_image = tf.image.decode_png(f.read())
 
     converted = tf.image.convert_image_dtype(
         raw_image,
@@ -122,10 +122,10 @@ def up_layer(layer, channel):
     
     return layer
 
-def skip(layer):
+def skip(layer,channel):
     conv_out = tf.contrib.layers.conv2d(
         inputs=layer,
-        num_outputs=4,
+        num_outputs=channel,
         kernel_size=1,
         stride=1,
         padding='SAME',
@@ -173,7 +173,7 @@ for i in range(down_layer_count):
     out = down_layer(out,channels_per_layer[i])
     # Keep a list of the skip layers, so they can be connected
     # to the upsampling layers.
-    skips.append(skip(out))
+    skips.append(skip(out,channels_per_skip_layer[i]))
 
     print("Shape after downsample layer " + str(i) + ":" + str(out.get_shape()))
     if log:
@@ -185,11 +185,11 @@ for i in range(up_layer_count):
     if i == 0:
         # As specified in the paper, the first upsampling layers is connected to
         # the last downsampling layer through a skip layer.
-        out = up_layer(skip(out),channels_per_layer[-1])
+        out = up_layer(skips[i],channels_per_layer[-1])
 
-        print("Shape after upsample " + str(i) + ":" + str(out.get_shape()))
+        print("Shape after upsample " + str(up_layer_count - i - 1) + ":" + str(out.get_shape()))
         if log:
-            f.write("Shape after upsample " + str(i) + ":" + str(out.get_shape()) + "\n")
+            f.write("Shape after upsample " + str(up_layer_count - i - 1) + ":" + str(out.get_shape()) + "\n")
 
     else:
         # The output of the rest of the skip layers is concatenated onto
@@ -198,9 +198,9 @@ for i in range(up_layer_count):
         # but nothing else makes sense for the shape of the tensors.
         out = up_layer(tf.concat([out, skips[i]], axis=3),channels_per_layer[-i-1])
         
-        print("Shape after upsample " + str(i) + ":" + str(out.get_shape()))
+        print("Shape after upsample " + str(up_layer_count - i - 1) + ":" + str(out.get_shape()))
         if log:
-            f.write("Shape after upsample " + str(i) + ":" + str(out.get_shape()) + "\n")
+            f.write("Shape after upsample " + str(up_layer_count - i - 1) + ":" + str(out.get_shape()) + "\n")
 
 # Restore original image dimensions and channels
 out = tf.contrib.layers.conv2d(
@@ -240,7 +240,7 @@ for i in range(nbre_iterations):
         [train_op, E],
         feed_dict = {rand: new_rand}
     )
-    print("STEP 2")
+    
     if i % 100 == 0:
         image_out = sess.run(out, feed_dict={rand: new_rand}).reshape(dim_h,dim_w,3)
         save_image(output_folder + "%d_%s" % (i, image_name) + ".png", image_out)
