@@ -3,7 +3,10 @@ from PIL import Image
 import tensorflow as tf
 
 #
-# load image 'filename' and return a tensor, the file format (h,w), the image size (w,h)
+# load image 'filename' and return a tensorflow tensor and a dict image_info
+# the tensor has the dimension [batch, height, width, (channel = 1 or 3). The pixel are coded in tf.float32 (0-1)
+# the dict contains the following info: format (JPEG, PNG, TIFF, etc), mode (RGB, L, I, ...), the size (height, width)
+# dataformat (tf.uint8, tf.uint16, tf.uint32) and channel (1 or 3)
 #
 def load_image(filename):
 
@@ -29,7 +32,8 @@ def load_image(filename):
         'format': None,
         'mode': None,
         'dataformat': None,
-        'size': None}
+        'size': None,
+        'channel': None}
 
     raw_image = Image.open(filename)
     print("Mode of image: " + raw_image.mode + ": " + Mode_Image[raw_image.mode] + "\n"
@@ -43,13 +47,18 @@ def load_image(filename):
     image_info['format'] = raw_image.format
     image_info['mode'] = raw_image.mode
     image_info['size'] = raw_image.size
-    if raw_image.mode in ('RGB','L'):
+    if raw_image.mode == 'RGB':
         image_info['dataformat'] = tf.uint8
+        image_info['channel'] = 3
+    elif raw_image.mode == 'L':
+        image_info['dataformat'] = tf.uint8
+        image_info['channel'] = 1
     elif raw_image.mode == 'I;16':
         image_info['dataformat'] = tf.uint16
+        image_info['channel'] = 1
     else:
         image_info['dataformat'] = tf.uint32
-
+        image_info['channel'] = 1
 
     np_array = np.array(raw_image) # https://docs.scipy.org/doc/numpy/reference/generated/numpy.array.html
     np_array_to_tf = tf.convert_to_tensor(np_array) # https://www.tensorflow.org/api_docs/python/tf/convert_to_tensor
@@ -59,3 +68,18 @@ def load_image(filename):
     image_tf = tf.expand_dims(converted, 0)
     
     return image_tf,image_info
+
+#
+# save a numpy array (diw_h,dim_w,channel) into an image file as defined in image_info['format']
+# after having converted the coding of each pixel.
+#
+def save_image(filename, image, image_info):
+    
+    # convertit le codage pixel (0 - 1) sur 32 bit en (0 - MAX) sur x bit
+    converted_img = tf.image.convert_image_dtype(
+        image,
+        image_info['dataformat'],
+        saturate=True)
+
+    pil_image = Image.fromarray(converted_img.numpy())
+    pil_image.save(filename)
